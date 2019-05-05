@@ -1,49 +1,72 @@
 <?php
- ob_start();
- session_start();
- function host() { return $_SERVER['HTTP_HOST']; }
- function request() { return $_SERVER['REQUEST_URI']; }
- function browsing() { return host().request(); };
- function domain() { return 'http://' . host(); }
- function get($key, $default = null) {
- 	$k = (strpos($key,'.')===false) ? null : ltrim(strstr($key,'.'),'.');
- 	$s = ($k==null) ? $key : strstr($key, '.', true); 
- 	
- 	if(!$k) { return (isset($_SESSION[$s])) ? $_SESSION[$s] : $default; }
- 	return (isset($_SESSION[$s]) && isset($_SESSION[$s][$k])) ? $_SESSION[$s][$k] : $default;
- }
- function session($key) { return (isset($_SESSION[$key])) ? $_SESSION[$key] : array(); }
- function save($key, $data) { $_SESSION[$key] = array_filter($data); }
- function delete($key) { unset($_SESSION[$key]); }
 
- if(isset($_POST) && isset($_GET['page'])) {
- 	switch ($_GET['page']) {
- 		case 'snmp-settings': 
-			$snmp = session('snmp');
-			if(isset($_POST['discovery'])) { $snmp['discovery'] = $_POST['discovery']; }
-			if(isset($_POST['destination'])) { $snmp['destination'] = $_POST['destination']; }
-			if(isset($_POST['filename'])) { $snmp['filename'] = $_POST['filename']; }
-			if(isset($_POST['upgradestatus'])) { $snmp['upgradestatus'] = $_POST['upgradestatus']; }
- 			save('snmp', $snmp);
- 		break;
- 		case 'system-settings': 
-			$system = session('system');
-			if(isset($_POST['path'])) { $system['path'] = $_POST['path']; }
-			if(isset($_POST['server'])) { $system['server'] = $_POST['server']; }
-			if(isset($_POST['cmts'])) { $system['cmts'] = $_POST['cmts']; }
-			if(isset($_POST['community'])) { $system['community'] = $_POST['community']; }
-			if(count($system)>0) { save('system', $system); } else { delete('system'); }
- 		break;
- 		case 'upgrade-flow': 
-			$config = session('config');
-			if(isset($_POST['firmware'])) { $system['firmware'] = $_POST['firmware']; }
-			if(isset($_POST['modem'])) { $system['modem'] = $_POST['modem']; }
- 		break;
- 	}
- }
+	ob_start();
+	session_start();
+	function host() { return $_SERVER['HTTP_HOST']; }
+	function request() { return $_SERVER['REQUEST_URI']; }
+	function browsing() { return host().request(); };
+	function domain() { return (strpos(request(), '?')===false) ? 'http://' . host() . request() : 'http://' . host() . strstr(request(), '?', true); }
 
-?>
-<!DOCTYPE html>
+	// Session handler
+	function session($key) { return (isset($_SESSION[$key])) ? $_SESSION[$key] : array(); }
+	function save($key, $data) { $_SESSION[$key] = array_filter($data); }
+	function delete($key) { unset($_SESSION[$key]); }
+	function get($key, $default = null) {
+		$k = (strpos($key,'.')===false) ? null : ltrim(strstr($key,'.'),'.');
+		$s = ($k==null) ? $key : strstr($key, '.', true); 
+		
+		if(!$k) { return (isset($_SESSION[$s])) ? $_SESSION[$s] : $default; }
+		return (isset($_SESSION[$s]) && isset($_SESSION[$s][$k])) ? $_SESSION[$s][$k] : $default;
+	}
+
+	// SNMP Aliases
+	function modemstatus($id) { return snmpget(cmts(), community(), '1.3.6.1.2.1.10.127.1.3.3.1.9.'.$id, 50000,2); }
+	function discovery() {	return get('snmp.discovery','1.3.6.1.2.1.10.127.1.3.3.1.3'); }
+
+	// System Aliases
+	function server() {		return get('system.server','172.22.0.13'); }
+	function cmts() {		return get('system.cmts','172.22.0.22'); }
+	function path() { 		return get('system.path','/home/albismart/tftpboot/'); }
+	function community() {	return get('system.community','albismart'); }
+
+	// Saving changes
+	if(isset($_POST) && isset($_GET['page'])) {
+		switch ($_GET['page']) {
+			case 'snmp-settings': 
+				$snmp = session('snmp');
+				if(isset($_POST['discovery'])) { $snmp['discovery'] = $_POST['discovery']; }
+				if(isset($_POST['destination'])) { $snmp['destination'] = $_POST['destination']; }
+				if(isset($_POST['filename'])) { $snmp['filename'] = $_POST['filename']; }
+				if(isset($_POST['upgradestatus'])) { $snmp['upgradestatus'] = $_POST['upgradestatus']; }
+				if(count($snmp)>0) { save('snmp', $snmp); } else { delete('snmp'); }
+			break;
+			case 'system-settings': 
+				$system = session('system');
+				if(isset($_POST['path'])) { $system['path'] = $_POST['path']; }
+				if(isset($_POST['server'])) { $system['server'] = $_POST['server']; }
+				if(isset($_POST['cmts'])) { $system['cmts'] = $_POST['cmts']; }
+				if(isset($_POST['community'])) { $system['community'] = $_POST['community']; }
+				if(count($system)>0) { save('system', $system); } else { delete('system'); }
+			break;
+			case 'upgrade-flow': 
+				$config = session('config');
+				if(isset($_POST['firmware'])) { $config['firmware'] = $_POST['firmware']; }
+				if(isset($_POST['modem'])) { $config['modem'] = $_POST['modem']; }
+				if(count($config)>0) { save('config', $config); } else { delete('config'); }
+			break;
+			case 'upload':
+				$uploadedFirmware = basename($_FILES["new_firmware"]["name"]);
+				if(move_uploaded_file($_FILES['new_firmware']['tmp_name'], path() . $uploadedFirmware)) {
+					$config = session('config');
+					$config['firmware'] = $uploadedFirmware;
+					save('config', $config);
+				}
+				header('Location: ' . domain() . '?page=upgrade-flow');
+			break;
+		}
+	}
+
+?><!DOCTYPE html>
 <html>
 <head>
 	<title>Firmware Upgrade - AlbiSmart</title>
@@ -51,11 +74,13 @@
 	<link rel="stylesheet" href="//unpkg.com/spectre.css/dist/spectre.min.css">
 </head>
 <body>
-	<div class="container">
+	<div class="container" style="overflow: hidden;">
 		<div class="columns">
 			<div class="column col-12">
-				<img src="//asmart.ams3.cdn.digitaloceanspaces.com/logo/logo-name.svg" style="width:220px;margin: 20px 20px 10px;float:left">
-				<p style="margin-top:35px;float: left;"> Browsing: <?php echo browsing(); ?> </p>
+				<a href="<?php echo domain(); ?>">
+					<img src="//asmart.ams3.cdn.digitaloceanspaces.com/logo/logo-name.svg" style="width:220px;margin: 20px 20px 10px;float:left">
+				</a>
+				<p class="text-gray" style="margin-top:35px;float: left;"> Browsing: <?php echo browsing(); ?> </p>
 				<div class="buttons" style="float:right;margin: 25px">
 					<a class="btn" href="<?php echo domain(); ?>?page=snmp-settings">SNMP Object ID's</a>
 					<a class="btn" href="<?php echo domain(); ?>?page=system-settings">System Settings</a>
@@ -70,7 +95,7 @@
 
 		<?php if($page==null) { ?>
 
-			<h3 style="font-weight: 300; margin: 100px auto;width: 100%; text-align: center;"> Initiate the progress by clicking Start or continue with configurations </h3>
+			<h3 class="text-center" style="font-weight: 300; margin: 100px auto;width: 100%;"> Initiate the progress by clicking Start or continue with configurations </h3>
 
 			<a class="btn btn-success" href="<?php echo domain(); ?>?page=upgrade-flow" style="height:70px;width:200px;margin: auto;font-size:22px;line-height: 60px;display: block;"> START </a>
 
@@ -80,12 +105,12 @@
 
 		<?php if($page=='snmp-settings') { ?>
 			<form method="POST" action="<?php echo domain(); ?>?page=snmp-settings">
-				<dic class="columns">
+				<div class="columns">
 					<div class="column col-6 col-mx-auto" style="margin:40px auto;text-align: center;">
 						<h2>Update Session based SNMP Settings</h2>
 					</div>
 				</div>
-				<dic class="columns">
+				<div class="columns">
 					<div class="column col-3"></div>
 					<div class="column col-6">
 						<div class="form-group">
@@ -135,12 +160,12 @@
 
 		<?php if($page=='system-settings') { ?>
 			<form method="POST" action="<?php echo domain(); ?>?page=system-settings">
-				<dic class="columns">
+				<div class="columns">
 					<div class="column col-6 col-mx-auto" style="margin:40px auto;text-align: center;">
 						<h2>Update Session based System Settings</h2>
 					</div>
 				</div>
-				<dic class="columns">
+				<div class="columns">
 					<div class="column col-3"></div>
 					<div class="column col-6">
 						<div class="form-group">
@@ -189,35 +214,130 @@
 
 		<?php if($page=='upgrade-flow') { ?>
 			<?php
-			$modems = snmpget(get('system.cmts','172.22.0.22'), get('system.community','albismart'), get('snmp.discovery','1.3.6.1.2.1.10.127.1.3.3.1.3'), 100000, 2);
-
-			var_dump($modems); ?>
-			<dic class="columns">
+				$modems = snmprealwalk(cmts(), community(), discovery(), 150000, 1);
+				$images = glob(path()."*.{bin,img,b7b}", GLOB_BRACE);
+			?>
+			<div class="columns">
 				<div class="column col-6 col-mx-auto" style="margin:40px auto 15px;text-align: center;">
-					<h2>Session based Upgrade Flow</h2>
+					<div class="panel">
+						<div class="panel-header">
+							<div class="panel-title"><h3 style="font-weight: 300">Session based Upgrade Flow</h3></div>
+							<div class="divider"></div>
+						</div>
+						<div class="panel-body">
+							<div class="columns">
+								<div class="column col-3"></div>
+								<div class="column col-6 text-center">
+									<h5>TFTP Server IP:
+										<small><?php echo server(); ?></small> <a href="<?php echo domain(); ?>?page=system-settings">(change)</a>
+									</h5>
+									<h5>TFTP Path:
+										<small><?php echo path(); ?></small>  <a href="<?php echo domain(); ?>?page=system-settings">(change)</a>
+									</h5>
+									<h5>CMTS IP:
+										<small><?php echo cmts(); ?></small>  <a href="<?php echo domain(); ?>?page=system-settings">(change)</a>
+									</h5>
+									<h5>CMTS Read Community:
+										<small><?php echo community(); ?></small> <a href="<?php echo domain(); ?>?page=system-settings">(change)</a>
+									</h5>
+								</div>
+							</div>
+						</div>
+					</div>
 				</div>
 			</div>
 
-			<dic class="columns">
+			<div class="columns">				
 				<div class="column col-3"></div>
-				<div class="column col-6" style="text-align: center">
-					<h5>TFTP Server IP: <small><?php echo (get('system.server')) ? get('system.server') : '172.22.0.13'; ?></small> <a href="<?php echo domain(); ?>?page=system-settings">(change)</a></h5>
-					<h5>TFTP Path: <small><?php echo (get('system.path')) ? get('system.path') : '/home/albismart/tftpboot/'; ?></small>  <a href="<?php echo domain(); ?>?page=system-settings">(change)</a></h5>
-					<h5>CMTS IP: <small><?php echo (get('system.cmts')) ? get('cmts.server') : '172.22.0.22'; ?></small>  <a href="<?php echo domain(); ?>?page=system-settings">(change)</a></h5>
-					<h5>CMTS Read Community: <small><?php echo (get('system.community')) ? get('cmts.community') : 'albismart'; ?></small> <a href="<?php echo domain(); ?>?page=system-settings">(change)</a></h5>
-				</div> <div class="column col-3"></div>
+				<div class="column col-6 text-center">
+					<form action="<?php echo domain(); ?>?page=upgrade-flow" class="column col-12" method="post" enctype="multipart/form-data">
+						<div class="panel">
+							<div class="panel-header">
+								<div class="panel-title"><h3 style="font-weight: 300">Select a modem and firmware</h3></div>
+								<div class="divider"></div>
+							</div>
+							<div class="panel-body">
+								<div class="columns">
+									<div class="form-group column col-12">
+									  <label>Modem:</label>
+									  <select class="form-select" style="width:100%">
+									  	<?php if($modems && count($modems)>0) { foreach($modems as $oid => $modem) {
+									  		$modemIP = ""; $modemID = "";
+									  		if($modem=='0.0.0.0') continue;
+									  		if(is_object($modem) && isset($modem->value)) { $modemIP = $modem->value; }
+									  		if(is_string($modem)) {
+									  			if(strpos($modem, "IpAddress:")===false) {
+								                	$modemIP = $modem;
+								                } else {
+								                	$modemIP = ltrim(strstr($modem, ": "), ": ");
+								                }
+									  		}
+									  		
+									  		$modemID = ltrim(strstr($oid, '3.3.1.3.'), '3.3.1.3.');
+							                $modemStatus = modemstatus($modemID);
+							                if(is_object($modemStatus)) { $modemStatus = $modemStatus->value; }
+							                if(is_string($modemStatus)) { $modemStatus = str_replace("INTEGER: ", '', $modemStatus); }
+							                
+							                if($modemStatus!=6) continue;
+							                
+									  		$description = snmpget($modemIP, 'public', '1.3.6.1.2.1.1.1.0', 100000, 2); 
+									  		if(is_object($description)) { $description = $description->value; }
+							                if(is_string($description)) { $description = str_replace("STRING: ", '', $description); } ?>
+									    	<option value="<?php echo $modemIP; ?>"><?php echo $modemIP . ' – ' . $description; ?></option>
+									    <?php } } if(!$modems || count($modems)==0) { ?>
+									    	<option value=""> No modems found, refresh the page </option>
+									    <?php } ?>
+									  </select>
+									</div>
+								</div>
+								
+								<div class="divider" style="margin: 25px 0 15px"></div>
+								
+								<div class="columns" id="select-firmware">
+									<div class="form-group column col-11" style="float:left">
+									  <label>Select firmware:</label>
+									  <select class="form-select" style="width:100%" name="firmware">
+									  	<option value=""> Existing firmwares </option>
+									  	<?php if($images && count($images)>0) { foreach($images as $image) { ?>
+									  		<?php $firmware = str_replace(path(),'', $image); ?>
+									    	<option <?php if(get('config.firmware')==$firmware) { echo 'selected="selected"'; } ?>>
+									    		<?php echo $firmware; ?>
+									    	</option>
+									    <?php } } ?>
+									  </select>
+									</div>
+									<div class="form-group column col-auto text-right" style="float: right;">
+										<button type="button" class="btn btn-primary btn-block" style="margin-top: 24px; font-size: 32px;padding-top: 0" onclick="document.getElementById('select-firmware').style.display='none';document.getElementById('upload-firmware').style.display='block';"> + </button>
+									</div>
+								</div>
 
-				<div class="column col-12"> <div class="divider"></div> </div>
+								<div class="columns" id="upload-firmware" style="display: none">
+									<div class="column col-auto text-right" style="float:left">
+										<button type="button" class="btn btn-block" style="margin-top:24px;" onclick="document.getElementById('select-firmware').style.display='block';document.getElementById('upload-firmware').style.display='none';"> ← </button>
+									</div>
+									<div class="form-group column col-11" style="float:left">
+									  <label>Upload a firmware image:</label><br/>
 
-				<div class="column col-6 col-mx-auto" style="text-align: center;">
-					<form action="<?php echo domain(); ?>?page=upgrade-flow" method="post" enctype="multipart/form-data">
-						<h2>Upload a firmware file</h2>
-						<input type="file" name="firmware" onchange="document.forms[0].submit()">
+									  <button type="button" class="btn btn-block" onclick="document.getElementById('browse-firmware').click()"> Browse a new Firmware </button>
+									</div>
+								</div>
+							</div>
+
+							<div class="divider" style="margin: 20px 0"></div>
+
+							<div class="panel-footer">
+								<button type="button" class="btn btn-primary btn-block btn-lg"> UPGRADE MODEM </button>
+							</div>
+						</div>
 					</form>
 				</div>
+				<div class="column col-3"></div>
 			</div>
+
+			<form style="position: absolute;left: -9999px" name="upload" action="<?php echo domain(); ?>?page=upload" method="POST" enctype="multipart/form-data">
+				<input type="file" name="new_firmware" id="browse-firmware" onchange="document.forms['upload'].submit()">
+			</form>
 		<?php } ?>
-		
 
 	</div>
 
