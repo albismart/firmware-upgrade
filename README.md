@@ -8,4 +8,4 @@ In order to get use of this tool, you should have a web server running PHP (with
 
 ### Installing
 
-Simple upload the file to apache directory or anywhere accessible on your web server.
+Simply upload the file to web server directory or accessible on your web browser.
