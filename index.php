@@ -29,6 +29,10 @@
 	function path() { 		return get('system.path','/home/albismart/tftpboot/'); }
 	function community() {	return get('system.community','albismart'); }
 
+	// Config Aliases
+	function modem() { return get('config.modem', @$_GET['modem']); }
+	function firmware() { return get('config.firmware', @$_GET['firmware']); }
+
 	// Saving changes
 	if(isset($_POST) && isset($_GET['page'])) {
 		switch ($_GET['page']) {
@@ -48,11 +52,24 @@
 				if(isset($_POST['community'])) { $system['community'] = $_POST['community']; }
 				if(count($system)>0) { save('system', $system); } else { delete('system'); }
 			break;
-			case 'upgrade-flow': 
+			case 'upgrade-flow':
+				$system = session('system');
 				$config = session('config');
 				if(isset($_POST['firmware'])) { $config['firmware'] = $_POST['firmware']; }
 				if(isset($_POST['modem'])) { $config['modem'] = $_POST['modem']; }
 				if(count($config)>0) { save('config', $config); } else { delete('config'); }
+				$server = (isset($system['server'])) ? $system['server'] : '172.22.0.13';
+				$cmts = (isset($system['cmts'])) ? $system['cmts'] : '172.22.0.22';
+				$path = (isset($system['path'])) ? $system['path'] : '/home/albismart/tftpboot/';
+
+				if(isset($config['modem']) && isset($config['firmware'])) {
+					$setServer = snmpset($config['modem'], 'public', '1.3.6.1.2.1.69.1.3.1.0', 'a', $server, 150000, 1);
+					$setFirmware = snmpset($config['modem'], 'public', '1.3.6.1.2.1.69.1.3.2.0', 's', $config['firmware'], 150000, 1);
+					$setUpgrade = snmpset($config['modem'], 'public', '1.3.6.1.2.1.69.1.3.3.0', 'i', 1, 150000, 1);
+
+					$success = ($setServer && $setFirmware && $setUpgrade) ? 1 : 0;
+					header('Location: ' . domain() . '?page=upgrade-status&success='.$success.'&modem='.$config['modem'].'&firmware='.$config['firmware']);
+				}
 			break;
 			case 'upload':
 				$uploadedFirmware = basename($_FILES["new_firmware"]["name"]);
@@ -80,7 +97,7 @@
 				<a href="<?php echo domain(); ?>">
 					<img src="//asmart.ams3.cdn.digitaloceanspaces.com/logo/logo-name.svg" style="width:220px;margin: 20px 20px 10px;float:left">
 				</a>
-				<p class="text-gray" style="margin-top:35px;float: left;"> Browsing: <?php echo browsing(); ?> </p>
+				<p class="text-gray" style="margin-top:35px;float: left;"> Browsing: <?php echo array_shift(explode('&', browsing())); ?> </p>
 				<div class="buttons" style="float:right;margin: 25px">
 					<a class="btn" href="<?php echo domain(); ?>?page=snmp-settings">SNMP Object ID's</a>
 					<a class="btn" href="<?php echo domain(); ?>?page=system-settings">System Settings</a>
@@ -97,7 +114,7 @@
 
 			<h3 class="text-center" style="font-weight: 300; margin: 100px auto;width: 100%;"> Initiate the progress by clicking Start or continue with configurations </h3>
 
-			<a class="btn btn-success" href="<?php echo domain(); ?>?page=upgrade-flow" style="height:70px;width:200px;margin: auto;font-size:22px;line-height: 60px;display: block;"> START </a>
+			<a class="btn btn-success" href="<?php echo domain(); ?>?page=upgrade-flow" style="height:70px;width:200px;margin: auto;font-size:22px;line-height: 60px;display: block;"> START → </a>
 
 			<a class="btn" href="<?php echo domain(); ?>?page=system-settings" style="width:125px;margin: 50px auto;display: block;"> Configure </a>
 
@@ -221,7 +238,7 @@
 				<div class="column col-6 col-mx-auto" style="margin:40px auto 15px;text-align: center;">
 					<div class="panel">
 						<div class="panel-header">
-							<div class="panel-title"><h3 style="font-weight: 300">Session based Upgrade Flow</h3></div>
+							<div class="panel-title"><h3 style="font-weight: 300"> <font style="float:left">ⓘ</font> Session based Upgrade Flow</h3></div>
 							<div class="divider"></div>
 						</div>
 						<div class="panel-body">
@@ -253,14 +270,16 @@
 					<form action="<?php echo domain(); ?>?page=upgrade-flow" class="column col-12" method="post" enctype="multipart/form-data">
 						<div class="panel">
 							<div class="panel-header">
-								<div class="panel-title"><h3 style="font-weight: 300">Select a modem and firmware</h3></div>
-								<div class="divider"></div>
+								<div class="panel-title"><h3 style="font-weight: 300;margin:0">Select a modem and firmware</h3></div>
 							</div>
+							
+							<div class="divider"></div>
+
 							<div class="panel-body">
 								<div class="columns">
 									<div class="form-group column col-12">
 									  <label>Modem:</label>
-									  <select class="form-select" style="width:100%">
+									  <select class="form-select" name="modem" style="width:100%">
 									  	<?php if($modems && count($modems)>0) { foreach($modems as $oid => $modem) {
 									  		$modemIP = ""; $modemID = "";
 									  		if($modem=='0.0.0.0') continue;
@@ -296,15 +315,13 @@
 								<div class="columns" id="select-firmware">
 									<div class="form-group column col-11" style="float:left">
 									  <label>Select firmware:</label>
-									  <select class="form-select" style="width:100%" name="firmware">
-									  	<option value=""> Existing firmwares </option>
-									  	<?php if($images && count($images)>0) { foreach($images as $image) { ?>
-									  		<?php $firmware = str_replace(path(),'', $image); ?>
-									    	<option <?php if(get('config.firmware')==$firmware) { echo 'selected="selected"'; } ?>>
-									    		<?php echo $firmware; ?>
-									    	</option>
-									    <?php } } ?>
-									  </select>
+									  <input class="form-input" list="firmwares" name="firmware" placeholder="Select an existing firmware" />
+									  <datalist  id="firmwares">
+									  	<?php if($images && count($images)>0) { foreach($images as $image) {
+									  		$firmware = str_replace(path(),'', $image);
+									  		echo '<option value="'.$firmware.'">';
+									    } } ?>
+									  </datalist>
 									</div>
 									<div class="form-group column col-auto text-right" style="float: right;">
 										<button type="button" class="btn btn-primary btn-block" style="margin-top: 24px; font-size: 32px;padding-top: 0" onclick="document.getElementById('select-firmware').style.display='none';document.getElementById('upload-firmware').style.display='block';"> + </button>
@@ -323,10 +340,10 @@
 								</div>
 							</div>
 
-							<div class="divider" style="margin: 20px 0"></div>
+							<div class="divider" style="margin: 20px 0 0"></div>
 
 							<div class="panel-footer">
-								<button type="button" class="btn btn-primary btn-block btn-lg"> UPGRADE MODEM </button>
+								<button type="submit" class="btn btn-success btn-block btn-lg"> UPGRADE MODEM </button>
 							</div>
 						</div>
 					</form>
@@ -337,6 +354,64 @@
 			<form style="position: absolute;left: -9999px" name="upload" action="<?php echo domain(); ?>?page=upload" method="POST" enctype="multipart/form-data">
 				<input type="file" name="new_firmware" id="browse-firmware" onchange="document.forms['upload'].submit()">
 			</form>
+		<?php } ?>
+
+		<?php if($page=='upgrade-status') { delete('config'); ?> 
+
+			<div class="columns">
+				<div class="column col-6 col-mx-auto" style="margin:40px auto 15px;text-align: center;">
+					<div class="panel">
+						<div class="panel-header">
+							<div class="panel-title"><h3 style="font-weight: 300;margin:0"><font style="float:left">ⓘ</font> Session based Upgrade Flow</h3></div>
+						</div>
+						<div class="divider"></div>
+						<div class="panel-body">
+							<div class="columns">
+								<div class="column col-12 text-left">
+									<h5>
+										<button type="button" class="btn s-circle" style="width: 36px;margin-right: 10px">ⓘ</button>
+										TFTP Server IP:
+										<small><?php echo server(); ?></small>
+									</h5>
+									<h5>
+										<button type="button" class="btn s-circle" style="width: 36px;margin-right: 10px">ⓘ</button>
+										TFTP Path:
+										<small><?php echo path(); ?></small>
+									</h5>
+									<h5>
+										<button type="button" class="btn s-circle" style="width: 36px;margin-right: 10px">ⓘ</button>
+										CMTS IP:
+										<small><?php echo cmts(); ?></small>
+									</h5>
+									<h5>
+										<button class="btn btn-success s-circle" style="width: 36px;margin-right: 10px">✓</button>
+										Modem IP:
+										<small><?php echo modem(); ?></small>
+									</h5>
+									<h5>
+										<button class="btn btn-success s-circle" style="width: 36px;margin-right: 10px">✓</button>
+										Firmware:
+										<small><?php echo firmware(); ?></small>
+									</h5>
+								</div>
+							</div>
+						</div>
+						<div class="divider" style="margin-bottom: 0"></div>
+						<div class="panel-footer text-center text-italic">
+							<cite> Status: Upgrade Initiated successfully, you can monitor your modem now. </cite>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<div class="columns">
+				<div class="column col-6 col-mx-auto">
+					<a href="<?php echo domain(); ?>?page=upgrade-flow" class="btn btn-success btn-block" style="margin-top:50px;padding: 50px;font-size:24px;line-height: 5px;background: #fff;color: #32b643">
+						Upgrade another modem →
+					</a>
+				</div>
+			</div>
+
 		<?php } ?>
 
 	</div>
