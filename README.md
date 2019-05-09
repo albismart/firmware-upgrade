@@ -1,7 +1,7 @@
 # Firmware Upgrade v0.1
 
 This tool helps you perform firmware upgrades primarily on Cable Modems.
-<img src="https://asmart.ams3.cdn.digitaloceanspaces.com/repo/firmware-upgrade/show.gif" />
+<img src="https://asmart.ams3.cdn.digitaloceanspaces.com/repo/firmware-upgrade/show.gif" width="300px" />
 
 ### Prerequisites
 
